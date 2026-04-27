@@ -16,22 +16,22 @@ warn() { printf '\033[1;33m[tgwol]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[tgwol]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || die "must run as root"
-command -v opkg >/dev/null 2>&1 || die "this installer requires OpenWRT (opkg not found)"
-command -v curl >/dev/null 2>&1 || { say "installing curl..."; opkg update >/dev/null && opkg install curl >/dev/null; }
+command -v apk >/dev/null 2>&1 || die "this installer requires OpenWRT 24.10+ (apk not found)"
+command -v curl >/dev/null 2>&1 || { say "installing curl..."; apk update >/dev/null && apk add curl >/dev/null; }
 
 say "OpenWRT Telegram WOL Bot installer"
 say "Source: $REPO_RAW"
 
 say "updating package lists..."
-opkg update >/dev/null 2>&1 || warn "opkg update failed (continuing — packages may be cached)"
+apk update >/dev/null 2>&1 || warn "apk update failed (continuing — packages may be cached)"
 
 PKGS="curl etherwake jsonfilter openssh-client luci-base luci-compat"
 say "installing packages: $PKGS"
 for p in $PKGS; do
-	if opkg list-installed | grep -q "^$p "; then
+	if apk info --installed "$p" >/dev/null 2>&1; then
 		continue
 	fi
-	opkg install "$p" >/dev/null 2>&1 || warn "could not install $p (try manually)"
+	apk add "$p" >/dev/null 2>&1 || warn "could not install $p (try manually)"
 done
 
 # luci-compat provides classic CBI on newer OpenWRT; it's optional but recommended.
