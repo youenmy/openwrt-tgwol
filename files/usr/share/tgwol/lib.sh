@@ -250,7 +250,7 @@ do_wol() {
 	bcast=$(uci -q get tgwol."$sec".broadcast)
 	port=$(uci -q get tgwol."$sec".wol_port)
 	iface=$(uci -q get tgwol."$sec".wol_iface)
-	[ -z "$mac" ] && { echo "MAC not set"; return 1; }
+	[ -z "$mac" ] && { echo "MAC не задан"; return 1; }
 	[ -z "$bcast" ] && bcast="255.255.255.255"
 	[ -z "$port" ] && port="9"
 
@@ -263,7 +263,7 @@ do_wol() {
 	elif command -v wakeonlan >/dev/null 2>&1; then
 		wakeonlan -i "$bcast" -p "$port" "$mac" 2>&1
 	else
-		echo "no WoL tool installed (etherwake/wakeonlan)"
+		echo "инструмент WoL не установлен (etherwake/wakeonlan)"
 		return 1
 	fi
 }
@@ -273,12 +273,12 @@ do_ping() {
 	local sec="$1" host
 	host=$(uci -q get tgwol."$sec".ip)
 	[ -z "$host" ] && host=$(uci -q get tgwol."$sec".ssh_host)
-	[ -z "$host" ] && { echo "no IP set"; return 1; }
+	[ -z "$host" ] && { echo "IP не задан"; return 1; }
 	if ping -c 2 -W 2 "$host" >/dev/null 2>&1; then
-		echo "online ($host)"
+		echo "онлайн ($host)"
 		return 0
 	fi
-	echo "offline ($host)"
+	echo "офлайн ($host)"
 	return 1
 }
 
@@ -293,10 +293,10 @@ _ssh_exec() {
 	port=$(uci -q get tgwol."$sec".ssh_port)
 	key=$(uci -q get tgwol."$sec".ssh_key)
 	[ -z "$port" ] && port=22
-	[ -z "$host" ] && { echo "no SSH host"; return 1; }
-	[ -z "$user" ] && { echo "no SSH user"; return 1; }
-	[ -z "$key" ] && { echo "no SSH key"; return 1; }
-	[ ! -f "$key" ] && { echo "SSH key file missing: $key"; return 1; }
+	[ -z "$host" ] && { echo "SSH-хост не задан"; return 1; }
+	[ -z "$user" ] && { echo "SSH-пользователь не задан"; return 1; }
+	[ -z "$key" ] && { echo "SSH-ключ не задан"; return 1; }
+	[ ! -f "$key" ] && { echo "файл SSH-ключа не найден: $key"; return 1; }
 
 	if command -v ssh >/dev/null 2>&1; then
 		ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -339,7 +339,7 @@ do_action() {
 	else
 		cmd=$(_os_cmd "$os" "$act")
 	fi
-	[ -z "$cmd" ] && { echo "no command for $os/$act"; return 1; }
+	[ -z "$cmd" ] && { echo "нет команды для $os/$act"; return 1; }
 	_ssh_exec "$sec" "$cmd"
 }
 
@@ -353,10 +353,10 @@ router_status() {
 	wan=$(ifstatus wan 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
 	[ -z "$wan" ] && wan="unknown"
 	cat <<EOF
-<b>Router status</b>
-Uptime: $up
-Load: $load
-Mem: $mem
+<b>Статус роутера</b>
+Аптайм: $up
+Нагрузка: $load
+Память: $mem
 WAN IP: $wan
 EOF
 }
@@ -366,13 +366,13 @@ router_clients() {
 	if [ -f /tmp/dhcp.leases ]; then
 		out=$(awk '{printf "• %s — %s (%s)\n", $4, $3, $2}' /tmp/dhcp.leases | head -40)
 	fi
-	[ -z "$out" ] && out="(no DHCP leases)"
-	printf '<b>DHCP clients</b>\n%s' "$out"
+	[ -z "$out" ] && out="(нет DHCP-аренд)"
+	printf '<b>DHCP-клиенты</b>\n%s' "$out"
 }
 
 router_reboot() {
 	(sleep 2 && reboot) &
-	echo "Rebooting router in 2s..."
+	echo "Перезагрузка роутера через 2 сек..."
 }
 
 router_shell() {

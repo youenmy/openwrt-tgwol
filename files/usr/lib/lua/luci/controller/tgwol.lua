@@ -12,19 +12,19 @@ function index()
 	page.acl_depends = { "luci-app-tgwol" }
 
 	entry({"admin", "services", "tgwol", "general"},
-		cbi("tgwol/general"), _("General"), 1).leaf = true
+		cbi("tgwol/general"), _("Основное"), 1).leaf = true
 
 	entry({"admin", "services", "tgwol", "devices"},
-		cbi("tgwol/devices"), _("Devices"), 2).leaf = true
+		cbi("tgwol/devices"), _("Устройства"), 2).leaf = true
 
 	entry({"admin", "services", "tgwol", "users"},
-		cbi("tgwol/users"), _("Users / Access"), 3).leaf = true
+		cbi("tgwol/users"), _("Пользователи / Доступ"), 3).leaf = true
 
 	entry({"admin", "services", "tgwol", "router"},
-		cbi("tgwol/router"), _("Router actions"), 4).leaf = true
+		cbi("tgwol/router"), _("Действия роутера"), 4).leaf = true
 
 	entry({"admin", "services", "tgwol", "status"},
-		template("tgwol/status"), _("Status"), 5).leaf = true
+		template("tgwol/status"), _("Статус"), 5).leaf = true
 
 	entry({"admin", "services", "tgwol", "action"},
 		call("action_handler"), nil).leaf = true

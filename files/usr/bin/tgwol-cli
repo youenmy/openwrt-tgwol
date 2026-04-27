@@ -10,21 +10,21 @@ config_get BOT_TOKEN main bot_token
 
 usage() {
 	cat <<EOF
-Usage: tgwol-cli <command> [args]
+Использование: tgwol-cli <команда> [аргументы]
 
-Commands:
-  test-token              ping Telegram getMe with current token
-  send <chat_id> <text>   send a test message
-  wake <device_section>   send WoL packet
-  ping <device_section>   ping device
-  status                  router status
-  clients                 DHCP clients
-  list-devices            show devices in config
-  list-users              show users in config
-  add-key <name>          generate ssh keypair under /etc/tgwol/keys/<name>
-  show-pubkey <name>      print public key for given name
-  set-token <token>       set bot_token in UCI and commit
-  reload                  /etc/init.d/tgwol restart
+Команды:
+  test-token              проверить токен через Telegram getMe
+  send <chat_id> <текст>  отправить тестовое сообщение
+  wake <секция_устройства> отправить WoL-пакет
+  ping <секция_устройства> пинговать устройство
+  status                  статус роутера
+  clients                 DHCP-клиенты
+  list-devices            показать устройства из конфига
+  list-users              показать пользователей из конфига
+  add-key <имя>           создать SSH-ключевую пару в /etc/tgwol/keys/<имя>
+  show-pubkey <имя>       вывести публичный ключ для указанного имени
+  set-token <токен>       записать bot_token в UCI и сохранить
+  reload                  перезапустить /etc/init.d/tgwol
 EOF
 }
 
@@ -32,7 +32,7 @@ cmd="${1:-}"; shift 2>/dev/null
 
 case "$cmd" in
 	test-token)
-		[ -z "$BOT_TOKEN" ] && { echo "no token"; exit 1; }
+		[ -z "$BOT_TOKEN" ] && { echo "токен не задан"; exit 1; }
 		curl -fsS "https://api.telegram.org/bot$BOT_TOKEN/getMe"
 		echo
 		;;
@@ -69,13 +69,13 @@ case "$cmd" in
 		done
 		;;
 	add-key)
-		name="${1:?name required}"
+		name="${1:?имя обязательно}"
 		dir=$(uci -q get tgwol.main.ssh_keydir)
 		[ -z "$dir" ] && dir=/etc/tgwol/keys
 		mkdir -p "$dir"
 		key="$dir/$name"
 		if [ -f "$key" ]; then
-			echo "$key already exists" >&2
+			echo "$key уже существует" >&2
 			exit 1
 		fi
 		if command -v ssh-keygen >/dev/null 2>&1; then
@@ -89,19 +89,19 @@ case "$cmd" in
 		fi
 		chmod 600 "$key" "$key.pub" 2>/dev/null
 		echo
-		echo "Key created: $key"
-		echo "Add the following public key to authorized_keys on the target machine:"
+		echo "Ключ создан: $key"
+		echo "Добавьте следующий публичный ключ в authorized_keys на целевой машине:"
 		cat "$key.pub"
 		;;
 	show-pubkey)
-		name="${1:?name required}"
+		name="${1:?имя обязательно}"
 		dir=$(uci -q get tgwol.main.ssh_keydir)
 		[ -z "$dir" ] && dir=/etc/tgwol/keys
 		[ -f "$dir/$name.pub" ] && cat "$dir/$name.pub" || {
-			echo "No pubkey for $name in $dir" >&2; exit 1; }
+			echo "Публичный ключ для $name не найден в $dir" >&2; exit 1; }
 		;;
 	set-token)
-		[ -z "$1" ] && { echo "token required"; exit 1; }
+		[ -z "$1" ] && { echo "токен обязателен"; exit 1; }
 		uci set tgwol.main.bot_token="$1"
 		uci commit tgwol
 		echo "ok"
@@ -113,7 +113,7 @@ case "$cmd" in
 		usage
 		;;
 	*)
-		echo "unknown command: $cmd" >&2
+		echo "неизвестная команда: $cmd" >&2
 		usage >&2
 		exit 1
 		;;

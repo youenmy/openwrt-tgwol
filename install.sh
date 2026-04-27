@@ -15,23 +15,23 @@ say()  { printf '\033[1;36m[tgwol]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[tgwol]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[tgwol]\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ "$(id -u)" = "0" ] || die "must run as root"
-command -v apk >/dev/null 2>&1 || die "this installer requires OpenWRT 24.10+ (apk not found)"
-command -v curl >/dev/null 2>&1 || { say "installing curl..."; apk update >/dev/null && apk add curl >/dev/null; }
+[ "$(id -u)" = "0" ] || die "требуются права root"
+command -v apk >/dev/null 2>&1 || die "установщик требует OpenWRT 24.10+ (apk не найден)"
+command -v curl >/dev/null 2>&1 || { say "устанавливаю curl..."; apk update >/dev/null && apk add curl >/dev/null; }
 
-say "OpenWRT Telegram WOL Bot installer"
-say "Source: $REPO_RAW"
+say "Установщик OpenWRT Telegram WOL Bot"
+say "Источник: $REPO_RAW"
 
-say "updating package lists..."
-apk update >/dev/null 2>&1 || warn "apk update failed (continuing — packages may be cached)"
+say "обновляю списки пакетов..."
+apk update >/dev/null 2>&1 || warn "apk update не удался (продолжаю — пакеты могут быть в кэше)"
 
 PKGS="curl etherwake jsonfilter openssh-client luci-base luci-compat"
-say "installing packages: $PKGS"
+say "устанавливаю пакеты: $PKGS"
 for p in $PKGS; do
 	if apk info --installed "$p" >/dev/null 2>&1; then
 		continue
 	fi
-	apk add "$p" >/dev/null 2>&1 || warn "could not install $p (try manually)"
+	apk add "$p" >/dev/null 2>&1 || warn "не удалось установить $p (попробуйте вручную)"
 done
 
 # luci-compat provides classic CBI on newer OpenWRT; it's optional but recommended.
@@ -46,12 +46,12 @@ fetch() {
 		chmod "$mode" "$dst"
 	else
 		rm -f "$tmp"
-		warn "failed to fetch $src"
+		warn "не удалось загрузить $src"
 		return 1
 	fi
 }
 
-say "downloading files..."
+say "загружаю файлы..."
 fetch usr/share/tgwol/lib.sh                         /usr/share/tgwol/lib.sh                          0644
 fetch usr/bin/tgwol-bot                              /usr/bin/tgwol-bot                               0755
 fetch usr/bin/tgwol-cli                              /usr/bin/tgwol-cli                               0755
@@ -60,9 +60,9 @@ fetch etc/init.d/tgwol                               /etc/init.d/tgwol          
 # UCI config — only install default if missing
 if [ ! -f /etc/config/tgwol ]; then
 	fetch etc/config/tgwol /etc/config/tgwol 0600
-	say "installed default /etc/config/tgwol"
+	say "установлен /etc/config/tgwol по умолчанию"
 else
-	say "kept existing /etc/config/tgwol"
+	say "существующий /etc/config/tgwol сохранён"
 fi
 
 # LuCI bits
@@ -81,16 +81,16 @@ chmod 700 /etc/tgwol/keys
 # Optional interactive setup — skip when piped without -- flag if no tty
 if [ "$PROMPT" = "1" ] && [ -t 0 ] && [ -t 1 ]; then
 	echo
-	say "interactive setup (Enter to skip a question)"
+	say "интерактивная настройка (Enter — пропустить)"
 
 	cur_token=$(uci -q get tgwol.main.bot_token || true)
-	printf '  Bot token from @BotFather%s: ' "$( [ -n "$cur_token" ] && echo " (current: ***)" || true )"
+	printf '  Токен бота от @BotFather%s: ' "$( [ -n "$cur_token" ] && echo " (текущий: ***)" || true )"
 	read -r tok || tok=""
 	if [ -n "$tok" ]; then
 		uci set tgwol.main.bot_token="$tok"
 	fi
 
-	printf '  Your Telegram chat_id (admin)%s: ' "(send /id to the bot once it runs to find it)"
+	printf '  Ваш Telegram chat_id (admin)%s: ' " (отправьте /id боту после запуска)"
 	read -r cid || cid=""
 	if [ -n "$cid" ]; then
 		# create or update an admin user
@@ -102,20 +102,20 @@ if [ "$PROMPT" = "1" ] && [ -t 0 ] && [ -t 1 ]; then
 		uci add_list tgwol.admin.permissions='all'
 	fi
 
-	printf '  MAC of your home PC (AA:BB:CC:DD:EE:FF, blank to skip): '
+	printf '  MAC домашнего ПК (AA:BB:CC:DD:EE:FF, пусто — пропустить): '
 	read -r mac || mac=""
 	if [ -n "$mac" ]; then
-		printf '  IP of your home PC (for ping/ssh): '
+		printf '  IP домашнего ПК (для ping/ssh): '
 		read -r ip || ip=""
-		printf '  Broadcast address [255.255.255.255]: '
+		printf '  Широковещательный адрес [255.255.255.255]: '
 		read -r bcast || bcast=""
 		[ -z "$bcast" ] && bcast="255.255.255.255"
-		printf '  OS of the PC (windows/linux/macos) [windows]: '
+		printf '  ОС компьютера (windows/linux/macos) [windows]: '
 		read -r os || os=""
 		[ -z "$os" ] && os="windows"
 
 		uci set tgwol.pc1=device
-		uci set tgwol.pc1.name='Home PC'
+		uci set tgwol.pc1.name='Домашний ПК'
 		uci set tgwol.pc1.mac="$mac"
 		uci set tgwol.pc1.ip="$ip"
 		uci set tgwol.pc1.broadcast="$bcast"
@@ -124,7 +124,7 @@ if [ "$PROMPT" = "1" ] && [ -t 0 ] && [ -t 1 ]; then
 		uci add_list tgwol.pc1.allowed_users='all'
 	fi
 
-	printf '  Enable bot now? [Y/n]: '
+	printf '  Включить бота сейчас? [Y/n]: '
 	read -r yn || yn=""
 	case "$yn" in
 		n|N|no|No) ;;
@@ -138,9 +138,9 @@ fi
 if [ "$(uci -q get tgwol.main.enabled)" = "1" ] && [ -n "$(uci -q get tgwol.main.bot_token)" ]; then
 	/etc/init.d/tgwol enable
 	/etc/init.d/tgwol restart
-	say "bot started — try /start in Telegram"
+	say "бот запущен — попробуйте /start в Telegram"
 else
-	say "bot is disabled or token is empty — open LuCI → Services → Telegram WOL Bot to finish setup"
+	say "бот отключён или токен пуст — откройте LuCI → Сервисы → Telegram WOL Bot для завершения настройки"
 fi
 
 # luci cache flush so menu appears

@@ -168,7 +168,7 @@ run_action() {
 		reboot)   perm=reboot ;;
 		sleep)    perm=sleep ;;
 		lock)     perm=lock ;;
-		*) echo "unknown action"; return 1 ;;
+		*) echo "неизвестное действие"; return 1 ;;
 	esac
 	if ! acl_can "$cid" "$perm"; then
 		printf '🚫 Нет права <code>%s</code>' "$perm"
@@ -209,7 +209,7 @@ run_router() {
 		status)  uci -q get tgwol.router.allow_status  | grep -q 1 || { echo "🚫 отключено"; return; }; router_status ;;
 		clients) uci -q get tgwol.router.allow_clients | grep -q 1 || { echo "🚫 отключено"; return; }; router_clients ;;
 		reboot)  uci -q get tgwol.router.allow_reboot  | grep -q 1 || { echo "🚫 отключено"; return; }; router_reboot ;;
-		*) echo "unknown" ;;
+		*) echo "неизвестно" ;;
 	esac
 }
 
@@ -422,19 +422,19 @@ main() {
 	offset=$(offset_load)
 	[ -z "$offset" ] && offset=0
 
-	log_info "tgwol-bot started (poll_timeout=$POLL_TIMEOUT, offset=$offset)"
+	log_info "tgwol-bot запущен (poll_timeout=$POLL_TIMEOUT, offset=$offset)"
 
 	while true; do
 		acl_load
 		resp=$(tg_get_updates "$offset" "$POLL_TIMEOUT")
 		if [ -z "$resp" ]; then
-			log_debug "no response (timeout/network)"
+			log_debug "нет ответа (таймаут/сеть)"
 			sleep 2
 			continue
 		fi
 		local ok; ok=$(jget "$resp" "@.ok")
 		if [ "$ok" != "true" ]; then
-			log_warn "telegram error: $(echo "$resp" | head -c 200)"
+			log_warn "ошибка Telegram: $(echo "$resp" | head -c 200)"
 			sleep 5
 			continue
 		fi
