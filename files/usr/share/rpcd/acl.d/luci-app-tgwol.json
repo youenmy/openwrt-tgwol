@@ -1,0 +1,24 @@
+{
+	"luci-app-tgwol": {
+		"description": "Grant UCI access for luci-app-tgwol",
+		"read": {
+			"uci": [ "tgwol" ],
+			"file": {
+				"/usr/bin/tgwol-cli test-token": [ "exec" ],
+				"/etc/init.d/tgwol enabled": [ "exec" ],
+				"/usr/bin/pidof tgwol-bot": [ "exec" ],
+				"/sbin/logread": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "tgwol" ],
+			"file": {
+				"/etc/init.d/tgwol start":   [ "exec" ],
+				"/etc/init.d/tgwol stop":    [ "exec" ],
+				"/etc/init.d/tgwol restart": [ "exec" ],
+				"/etc/init.d/tgwol enable":  [ "exec" ],
+				"/etc/init.d/tgwol disable": [ "exec" ]
+			}
+		}
+	}
+}

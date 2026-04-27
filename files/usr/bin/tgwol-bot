@@ -1,0 +1,455 @@
+#!/bin/sh
+# tgwol-bot — Telegram WOL bot main daemon
+# shellcheck shell=ash disable=SC2039
+
+set -u
+
+. /usr/share/tgwol/lib.sh
+. /lib/functions.sh
+
+config_load tgwol
+config_get BOT_TOKEN main bot_token
+config_get POLL_TIMEOUT main poll_timeout 50
+config_get LOG_LEVEL main log_level info
+TGWOL_LOG_LEVEL="$LOG_LEVEL"
+export TGWOL_LOG_LEVEL
+
+if [ -z "$BOT_TOKEN" ]; then
+	log_err "bot_token is empty — exiting"
+	exit 1
+fi
+
+# Persistent state for "awaiting next message" (e.g. shell command)
+AWAIT_DIR="$TGWOL_STATE_DIR/await"
+mkdir -p "$AWAIT_DIR"
+
+set_await() {
+	# usage: set_await <chat_id> <action>
+	echo "$2" > "$AWAIT_DIR/$1"
+}
+get_await() {
+	[ -f "$AWAIT_DIR/$1" ] && cat "$AWAIT_DIR/$1"
+}
+clear_await() {
+	rm -f "$AWAIT_DIR/$1"
+}
+
+trap 'log_info "received signal, exiting"; exit 0' TERM INT
+
+# ---------- helpers ----------
+
+list_devices() {
+	uci -q show tgwol | awk -F'[.=]' '/=device$/ {print $2}'
+}
+
+list_users() {
+	uci -q show tgwol | awk -F'[.=]' '/=user$/ {print $2}'
+}
+
+device_label() {
+	local sec="$1" name os ip
+	name=$(uci -q get tgwol."$sec".name)
+	os=$(uci -q get tgwol."$sec".os)
+	[ -z "$name" ] && name="$sec"
+	[ -z "$os" ] && os=""
+	printf '%s' "$name"
+}
+
+# ---------- menu builders ----------
+
+kbd_main() {
+	local rows
+	rows=$(row "$(btn '🖥 Устройства' 'm:devs')" "$(btn '🌐 Роутер' 'm:rt')")
+	rows="$rows,$(row "$(btn 'ℹ️ Помощь' 'm:help')" "$(btn '🆔 Мой ID' 'm:id')")"
+	printf '{"inline_keyboard":[%s]}' "$rows"
+}
+
+kbd_devices() {
+	# usage: kbd_devices <chat_id>
+	local cid="$1" rows="" sec name first=1 r
+	for sec in $(list_devices); do
+		acl_device_allowed "$cid" "$sec" || continue
+		name=$(device_label "$sec")
+		r=$(row "$(btn "$name" "dev:$sec")")
+		[ "$first" = "1" ] || rows="$rows,"
+		rows="$rows$r"
+		first=0
+	done
+	if [ -z "$rows" ]; then
+		rows=$(row "$(btn '(нет устройств)' 'm:main')")
+	fi
+	rows="$rows,$(row "$(btn '⬅️ Назад' 'm:main')")"
+	printf '{"inline_keyboard":[%s]}' "$rows"
+}
+
+kbd_device() {
+	# usage: kbd_device <chat_id> <sec>
+	local cid="$1" sec="$2" rows
+	rows=$(row "$(btn '⏰ Разбудить' "act:$sec:wake")" "$(btn '📡 Пинг' "act:$sec:ping")")
+	rows="$rows,$(row "$(btn '🔌 Выключить' "act:$sec:shutdown")" "$(btn '🔄 Ребут' "act:$sec:reboot")")"
+	rows="$rows,$(row "$(btn '💤 Сон' "act:$sec:sleep")" "$(btn '🔒 Заблок.' "act:$sec:lock")")"
+	rows="$rows,$(row "$(btn '⬅️ К списку' 'm:devs')" "$(btn '🏠 Главное' 'm:main')")"
+	printf '{"inline_keyboard":[%s]}' "$rows"
+}
+
+kbd_router() {
+	local rows allow_status allow_cli allow_reb allow_sh
+	allow_status=$(uci -q get tgwol.router.allow_status)
+	allow_cli=$(uci -q get tgwol.router.allow_clients)
+	allow_reb=$(uci -q get tgwol.router.allow_reboot)
+	allow_sh=$(uci -q get tgwol.router.allow_shell)
+	rows=""
+	[ "$allow_status" = "1" ] && rows="$rows,$(row "$(btn '📊 Статус' 'rt:status')")"
+	[ "$allow_cli" = "1" ]   && rows="$rows,$(row "$(btn '👥 Клиенты' 'rt:clients')")"
+	[ "$allow_reb" = "1" ]   && rows="$rows,$(row "$(btn '🔄 Перезагрузить роутер' 'rt:reboot:ask')")"
+	[ "$allow_sh" = "1" ]    && rows="$rows,$(row "$(btn '💻 Shell-команда' 'rt:shell')")"
+	rows="${rows#,}"
+	[ -z "$rows" ] && rows=$(row "$(btn '(всё отключено в конфиге)' 'm:main')")
+	rows="$rows,$(row "$(btn '🏠 Главное' 'm:main')")"
+	printf '{"inline_keyboard":[%s]}' "$rows"
+}
+
+kbd_confirm() {
+	# usage: kbd_confirm <yes_callback> <no_callback>
+	local rows
+	rows=$(row "$(btn '✅ Да' "$1")" "$(btn '❌ Нет' "$2")")
+	printf '{"inline_keyboard":[%s]}' "$rows"
+}
+
+kbd_back() {
+	local target="${1:-m:main}"
+	printf '{"inline_keyboard":[%s]}' "$(row "$(btn '⬅️ Назад' "$target")")"
+}
+
+# ---------- text builders ----------
+
+txt_main() {
+	cat <<EOF
+<b>🤖 OpenWRT WOL Bot</b> v${TGWOL_VERSION}
+Управление домашним ПК и роутером.
+Выбери раздел:
+EOF
+}
+
+txt_help() {
+	cat <<EOF
+<b>Команды:</b>
+/menu — главное меню
+/wake [имя] — разбудить устройство
+/ping [имя] — проверить онлайн
+/shutdown, /reboot, /sleep, /lock [имя]
+/status — статус роутера
+/clients — DHCP-клиенты
+/sh &lt;cmd&gt; — shell-команда (admin)
+/id — узнать свой chat_id
+
+Без аргумента команды покажут список устройств кнопками.
+EOF
+}
+
+txt_unauthorized() {
+	cat <<EOF
+🚫 <b>Доступ запрещён</b>
+Твой chat_id: <code>$1</code>
+Попроси админа добавить тебя в whitelist.
+EOF
+}
+
+# ---------- action runners ----------
+
+run_action() {
+	# usage: run_action <chat_id> <sec> <act>
+	local cid="$1" sec="$2" act="$3" name out perm
+	name=$(device_label "$sec")
+	case "$act" in
+		wake) perm=wake ;;
+		ping) perm=ping ;;
+		shutdown) perm=shutdown ;;
+		reboot)   perm=reboot ;;
+		sleep)    perm=sleep ;;
+		lock)     perm=lock ;;
+		*) echo "unknown action"; return 1 ;;
+	esac
+	if ! acl_can "$cid" "$perm"; then
+		printf '🚫 Нет права <code>%s</code>' "$perm"
+		return 1
+	fi
+	if ! acl_device_allowed "$cid" "$sec"; then
+		printf '🚫 Нет доступа к устройству %s' "$name"
+		return 1
+	fi
+	case "$act" in
+		wake)
+			out=$(do_wol "$sec" 2>&1)
+			[ $? -eq 0 ] && printf '⏰ Magic packet → %s\n<code>%s</code>' "$name" "$out" \
+				|| printf '❌ WOL ошибка для %s:\n<code>%s</code>' "$name" "$out"
+			;;
+		ping)
+			out=$(do_ping "$sec" 2>&1)
+			[ $? -eq 0 ] && printf '✅ %s — %s' "$name" "$out" \
+				|| printf '⛔ %s — %s' "$name" "$out"
+			;;
+		shutdown|reboot|sleep|lock)
+			out=$(do_action "$sec" "$act" 2>&1 | head -c 1500)
+			[ -z "$out" ] && out="(ok)"
+			printf '🛠 %s → %s\n<pre>%s</pre>' "$act" "$name" "$out"
+			;;
+	esac
+}
+
+run_router() {
+	# usage: run_router <chat_id> <sub>
+	local cid="$1" sub="$2"
+	if ! acl_can "$cid" "router_$sub"; then
+		# fallback: admin-only check via acl_role
+		local r; r=$(acl_role "$cid")
+		[ "$r" = "admin" ] || { echo "🚫 нет прав"; return; }
+	fi
+	case "$sub" in
+		status)  uci -q get tgwol.router.allow_status  | grep -q 1 || { echo "🚫 отключено"; return; }; router_status ;;
+		clients) uci -q get tgwol.router.allow_clients | grep -q 1 || { echo "🚫 отключено"; return; }; router_clients ;;
+		reboot)  uci -q get tgwol.router.allow_reboot  | grep -q 1 || { echo "🚫 отключено"; return; }; router_reboot ;;
+		*) echo "unknown" ;;
+	esac
+}
+
+# ---------- update handlers ----------
+
+handle_command() {
+	# usage: handle_command <chat_id> <text>
+	local cid="$1" text="$2" cmd arg sec name out msg
+	cmd=$(echo "$text" | awk '{print $1}')
+	arg=$(echo "$text" | cut -d' ' -f2-)
+	[ "$arg" = "$cmd" ] && arg=""
+	cmd=$(echo "$cmd" | sed 's/@.*$//')
+
+	case "$cmd" in
+		/start|/menu)
+			tg_send_message "$cid" "$(txt_main)" "$(kbd_main)"
+			return
+			;;
+		/help)
+			tg_send_message "$cid" "$(txt_help)" "$(kbd_back m:main)"
+			return
+			;;
+		/id)
+			tg_send_message "$cid" "Твой chat_id: <code>$cid</code>"
+			return
+			;;
+	esac
+
+	# All other commands need access
+	if ! acl_can "$cid" "menu"; then
+		# permissive: any registered user reaches command dispatch
+		local role; role=$(acl_role "$cid")
+		if [ -z "$role" ] && [ "$(uci -q get tgwol.main.access_mode)" != "open" ]; then
+			tg_send_message "$cid" "$(txt_unauthorized "$cid")"
+			return
+		fi
+	fi
+
+	case "$cmd" in
+		/wake|/ping|/shutdown|/reboot|/sleep|/lock)
+			local act=${cmd#/}
+			if [ -z "$arg" ]; then
+				tg_send_message "$cid" "Выбери устройство:" "$(kbd_devices "$cid")"
+				return
+			fi
+			# find device by name
+			sec=""
+			for s in $(list_devices); do
+				name=$(uci -q get tgwol."$s".name)
+				if [ "$name" = "$arg" ] || [ "$s" = "$arg" ]; then sec="$s"; break; fi
+			done
+			[ -z "$sec" ] && { tg_send_message "$cid" "Устройство <b>$arg</b> не найдено"; return; }
+			out=$(run_action "$cid" "$sec" "$act")
+			tg_send_message "$cid" "$out"
+			;;
+		/status)
+			out=$(run_router "$cid" status)
+			tg_send_message "$cid" "$out" "$(kbd_back m:rt)"
+			;;
+		/clients)
+			out=$(run_router "$cid" clients)
+			tg_send_message "$cid" "$out" "$(kbd_back m:rt)"
+			;;
+		/sh)
+			local role; role=$(acl_role "$cid")
+			[ "$role" = "admin" ] || { tg_send_message "$cid" "🚫 только admin"; return; }
+			[ "$(uci -q get tgwol.router.allow_shell)" = "1" ] || { tg_send_message "$cid" "🚫 shell отключён в конфиге"; return; }
+			[ -z "$arg" ] && { tg_send_message "$cid" "Использование: /sh &lt;команда&gt;"; return; }
+			out=$(router_shell "$arg")
+			tg_send_message "$cid" "$out"
+			;;
+		*)
+			# Maybe it's a follow-up to awaiting state
+			local aw; aw=$(get_await "$cid")
+			if [ -n "$aw" ]; then
+				clear_await "$cid"
+				case "$aw" in
+					router_shell)
+						local role; role=$(acl_role "$cid")
+						[ "$role" = "admin" ] && [ "$(uci -q get tgwol.router.allow_shell)" = "1" ] || \
+							{ tg_send_message "$cid" "🚫"; return; }
+						out=$(router_shell "$text")
+						tg_send_message "$cid" "$out" "$(kbd_back m:rt)"
+						;;
+				esac
+				return
+			fi
+			tg_send_message "$cid" "Неизвестная команда. /menu" "$(kbd_main)"
+			;;
+	esac
+}
+
+handle_callback() {
+	# usage: handle_callback <chat_id> <msg_id> <cb_id> <data>
+	local cid="$1" mid="$2" cbid="$3" data="$4" out
+	log_debug "callback: cid=$cid data=$data"
+
+	# cheap auth: any callback requires whitelist (or open mode)
+	if [ "$(uci -q get tgwol.main.access_mode)" != "open" ] && [ -z "$(acl_role "$cid")" ]; then
+		tg_answer_callback "$cbid" "Нет доступа" true
+		return
+	fi
+
+	case "$data" in
+		m:main)
+			tg_edit_message "$cid" "$mid" "$(txt_main)" "$(kbd_main)"
+			tg_answer_callback "$cbid"
+			;;
+		m:devs)
+			tg_edit_message "$cid" "$mid" "Выбери устройство:" "$(kbd_devices "$cid")"
+			tg_answer_callback "$cbid"
+			;;
+		m:rt)
+			tg_edit_message "$cid" "$mid" "Раздел роутера:" "$(kbd_router)"
+			tg_answer_callback "$cbid"
+			;;
+		m:help)
+			tg_edit_message "$cid" "$mid" "$(txt_help)" "$(kbd_back m:main)"
+			tg_answer_callback "$cbid"
+			;;
+		m:id)
+			tg_edit_message "$cid" "$mid" "Твой chat_id: <code>$cid</code>" "$(kbd_back m:main)"
+			tg_answer_callback "$cbid"
+			;;
+		dev:*)
+			local sec=${data#dev:}
+			local name; name=$(device_label "$sec")
+			tg_edit_message "$cid" "$mid" "Устройство: <b>$name</b>" "$(kbd_device "$cid" "$sec")"
+			tg_answer_callback "$cbid"
+			;;
+		act:*)
+			local rest=${data#act:}
+			local sec=${rest%:*}
+			local act=${rest##*:}
+			tg_answer_callback "$cbid" "⏳ Выполняю..."
+			out=$(run_action "$cid" "$sec" "$act")
+			tg_edit_message "$cid" "$mid" "$out" "$(kbd_device "$cid" "$sec")"
+			;;
+		rt:status)
+			tg_answer_callback "$cbid"
+			out=$(run_router "$cid" status)
+			tg_edit_message "$cid" "$mid" "$out" "$(kbd_back m:rt)"
+			;;
+		rt:clients)
+			tg_answer_callback "$cbid"
+			out=$(run_router "$cid" clients)
+			tg_edit_message "$cid" "$mid" "$out" "$(kbd_back m:rt)"
+			;;
+		rt:reboot:ask)
+			tg_edit_message "$cid" "$mid" "⚠️ Перезагрузить роутер?" \
+				"$(kbd_confirm 'rt:reboot:yes' 'm:rt')"
+			tg_answer_callback "$cbid"
+			;;
+		rt:reboot:yes)
+			tg_answer_callback "$cbid" "Перезагрузка..."
+			out=$(run_router "$cid" reboot)
+			tg_edit_message "$cid" "$mid" "$out"
+			;;
+		rt:shell)
+			local role; role=$(acl_role "$cid")
+			[ "$role" = "admin" ] || { tg_answer_callback "$cbid" "🚫 admin only" true; return; }
+			[ "$(uci -q get tgwol.router.allow_shell)" = "1" ] || { tg_answer_callback "$cbid" "🚫 disabled" true; return; }
+			set_await "$cid" router_shell
+			tg_edit_message "$cid" "$mid" "💻 Пришли следующим сообщением shell-команду:" "$(kbd_back m:rt)"
+			tg_answer_callback "$cbid"
+			;;
+		*)
+			tg_answer_callback "$cbid" "?"
+			;;
+	esac
+}
+
+handle_update() {
+	# usage: handle_update <updates_json> <index>
+	local upd="$1" i="$2"
+	local msg cid mid text cbid data
+
+	cid=$(jget "$upd" "@.result[$i].message.chat.id")
+	if [ -n "$cid" ]; then
+		text=$(jget "$upd" "@.result[$i].message.text")
+		[ -z "$text" ] && return
+		log_debug "msg from $cid: $text"
+		# handle text or command
+		case "$text" in
+			/*)
+				handle_command "$cid" "$text"
+				;;
+			*)
+				# Plain text — might be follow-up to await state
+				handle_command "$cid" "$text"
+				;;
+		esac
+		return
+	fi
+
+	# callback
+	cid=$(jget "$upd" "@.result[$i].callback_query.from.id")
+	if [ -n "$cid" ]; then
+		mid=$(jget "$upd" "@.result[$i].callback_query.message.message_id")
+		cbid=$(jget "$upd" "@.result[$i].callback_query.id")
+		data=$(jget "$upd" "@.result[$i].callback_query.data")
+		handle_callback "$cid" "$mid" "$cbid" "$data"
+	fi
+}
+
+# ---------- main loop ----------
+
+main() {
+	local offset resp count i
+	offset=$(offset_load)
+	[ -z "$offset" ] && offset=0
+
+	log_info "tgwol-bot started (poll_timeout=$POLL_TIMEOUT, offset=$offset)"
+
+	while true; do
+		acl_load
+		resp=$(tg_get_updates "$offset" "$POLL_TIMEOUT")
+		if [ -z "$resp" ]; then
+			log_debug "no response (timeout/network)"
+			sleep 2
+			continue
+		fi
+		local ok; ok=$(jget "$resp" "@.ok")
+		if [ "$ok" != "true" ]; then
+			log_warn "telegram error: $(echo "$resp" | head -c 200)"
+			sleep 5
+			continue
+		fi
+		count=$(jlen "$resp" "@.result[*].update_id")
+		i=0
+		while [ "$i" -lt "$count" ]; do
+			handle_update "$resp" "$i"
+			local uid; uid=$(jget "$resp" "@.result[$i].update_id")
+			if [ -n "$uid" ]; then
+				offset=$((uid + 1))
+				offset_save "$offset"
+			fi
+			i=$((i + 1))
+		done
+	done
+}
+
+main

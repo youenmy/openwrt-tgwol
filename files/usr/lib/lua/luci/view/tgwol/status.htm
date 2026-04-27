@@ -1,0 +1,74 @@
+<%+header%>
+
+<%
+local sys  = require "luci.sys"
+local util = require "luci.util"
+local disp = require "luci.dispatcher"
+
+local pid = util.trim(sys.exec("pidof tgwol-bot 2>/dev/null") or "")
+local running = (pid ~= "" and pid ~= nil)
+
+local enabled_in_uci = util.trim(sys.exec("uci -q get tgwol.main.enabled") or "0") == "1"
+local autostart = (sys.call("/etc/init.d/tgwol enabled") == 0)
+
+local logs = sys.exec("logread -e tgwol 2>/dev/null | tail -n 80")
+if not logs or logs == "" then
+	logs = sys.exec("logread 2>/dev/null | grep -i tgwol | tail -n 80")
+end
+
+local me_json = ""
+local token = util.trim(sys.exec("uci -q get tgwol.main.bot_token") or "")
+if token ~= "" then
+	me_json = sys.exec(string.format(
+		"curl -fsS --max-time 5 'https://api.telegram.org/bot%s/getMe' 2>&1",
+		token:gsub("[^%w:_-]", "")))
+end
+%>
+
+<h2 class="cbi-map-title"><%:Telegram WOL Bot — Status%></h2>
+
+<fieldset class="cbi-section">
+	<legend><%:Service%></legend>
+	<table class="cbi-section-table">
+		<tr>
+			<td><strong><%:Daemon%>:</strong></td>
+			<td>
+				<% if running then %>
+					<span style="color:green;font-weight:bold">● running</span> (PID <%=pid%>)
+				<% else %>
+					<span style="color:#a00;font-weight:bold">○ stopped</span>
+				<% end %>
+			</td>
+		</tr>
+		<tr>
+			<td><strong><%:Enabled in UCI%>:</strong></td>
+			<td><%= enabled_in_uci and "yes" or "no" %></td>
+		</tr>
+		<tr>
+			<td><strong><%:Autostart at boot%>:</strong></td>
+			<td><%= autostart and "yes" or "no" %></td>
+		</tr>
+	</table>
+
+	<form method="post" action="<%=disp.build_url('admin','services','tgwol','action')%>" style="margin-top:10px">
+		<input type="hidden" name="token" value="<%=token%>" />
+		<input class="cbi-button cbi-button-apply"  type="submit" name="act" value="start"   />
+		<input class="cbi-button cbi-button-reset"  type="submit" name="act" value="stop"    />
+		<input class="cbi-button cbi-button-action" type="submit" name="act" value="restart" />
+		<input class="cbi-button cbi-button-add"    type="submit" name="act" value="enable"  />
+		<input class="cbi-button cbi-button-remove" type="submit" name="act" value="disable" />
+		<input class="cbi-button cbi-button-action" type="submit" name="act" value="test"    title="<%:Call Telegram getMe with current token%>" />
+	</form>
+</fieldset>
+
+<fieldset class="cbi-section">
+	<legend><%:Telegram getMe%></legend>
+	<pre style="white-space:pre-wrap;background:#222;color:#0f0;padding:8px;border-radius:4px"><%= util.pcdata(me_json ~= "" and me_json or "(no token configured)") %></pre>
+</fieldset>
+
+<fieldset class="cbi-section">
+	<legend><%:Recent log%></legend>
+	<pre style="white-space:pre-wrap;background:#111;color:#ddd;padding:8px;border-radius:4px;max-height:400px;overflow:auto"><%= util.pcdata(logs ~= "" and logs or "(no log entries)") %></pre>
+</fieldset>
+
+<%+footer%>

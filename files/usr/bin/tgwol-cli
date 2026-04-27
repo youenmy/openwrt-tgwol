@@ -1,0 +1,120 @@
+#!/bin/sh
+# tgwol-cli — admin/test CLI for tgwol
+# shellcheck shell=ash
+
+. /usr/share/tgwol/lib.sh
+. /lib/functions.sh
+
+config_load tgwol
+config_get BOT_TOKEN main bot_token
+
+usage() {
+	cat <<EOF
+Usage: tgwol-cli <command> [args]
+
+Commands:
+  test-token              ping Telegram getMe with current token
+  send <chat_id> <text>   send a test message
+  wake <device_section>   send WoL packet
+  ping <device_section>   ping device
+  status                  router status
+  clients                 DHCP clients
+  list-devices            show devices in config
+  list-users              show users in config
+  add-key <name>          generate ssh keypair under /etc/tgwol/keys/<name>
+  show-pubkey <name>      print public key for given name
+  set-token <token>       set bot_token in UCI and commit
+  reload                  /etc/init.d/tgwol restart
+EOF
+}
+
+cmd="${1:-}"; shift 2>/dev/null
+
+case "$cmd" in
+	test-token)
+		[ -z "$BOT_TOKEN" ] && { echo "no token"; exit 1; }
+		curl -fsS "https://api.telegram.org/bot$BOT_TOKEN/getMe"
+		echo
+		;;
+	send)
+		cid="$1"; shift
+		tg_send_message "$cid" "$*"
+		;;
+	wake)
+		do_wol "$1"
+		;;
+	ping)
+		do_ping "$1"
+		;;
+	status)
+		router_status
+		;;
+	clients)
+		router_clients
+		;;
+	list-devices)
+		uci -q show tgwol | awk -F'[.=]' '/=device$/ {print $2}' | while read -r s; do
+			n=$(uci -q get tgwol."$s".name)
+			m=$(uci -q get tgwol."$s".mac)
+			i=$(uci -q get tgwol."$s".ip)
+			printf '%-15s %-25s %-18s %s\n' "$s" "$n" "$m" "$i"
+		done
+		;;
+	list-users)
+		uci -q show tgwol | awk -F'[.=]' '/=user$/ {print $2}' | while read -r s; do
+			c=$(uci -q get tgwol."$s".chat_id)
+			r=$(uci -q get tgwol."$s".role)
+			n=$(uci -q get tgwol."$s".name)
+			printf '%-15s %-15s %-7s %s\n' "$s" "$c" "$r" "$n"
+		done
+		;;
+	add-key)
+		name="${1:?name required}"
+		dir=$(uci -q get tgwol.main.ssh_keydir)
+		[ -z "$dir" ] && dir=/etc/tgwol/keys
+		mkdir -p "$dir"
+		key="$dir/$name"
+		if [ -f "$key" ]; then
+			echo "$key already exists" >&2
+			exit 1
+		fi
+		if command -v ssh-keygen >/dev/null 2>&1; then
+			ssh-keygen -t ed25519 -N '' -C "tgwol@$(uci -q get system.@system[0].hostname)" -f "$key"
+		else
+			# dropbear
+			dropbearkey -t ed25519 -f "$key" | tee "$key.tmp" >/dev/null
+			# extract pubkey
+			dropbearkey -y -f "$key" | grep ^ssh- > "$key.pub"
+			rm -f "$key.tmp"
+		fi
+		chmod 600 "$key" "$key.pub" 2>/dev/null
+		echo
+		echo "Key created: $key"
+		echo "Add the following public key to authorized_keys on the target machine:"
+		cat "$key.pub"
+		;;
+	show-pubkey)
+		name="${1:?name required}"
+		dir=$(uci -q get tgwol.main.ssh_keydir)
+		[ -z "$dir" ] && dir=/etc/tgwol/keys
+		[ -f "$dir/$name.pub" ] && cat "$dir/$name.pub" || {
+			echo "No pubkey for $name in $dir" >&2; exit 1; }
+		;;
+	set-token)
+		[ -z "$1" ] && { echo "token required"; exit 1; }
+		uci set tgwol.main.bot_token="$1"
+		uci commit tgwol
+		echo "ok"
+		;;
+	reload)
+		/etc/init.d/tgwol restart
+		;;
+	""|-h|--help)
+		usage
+		;;
+	*)
+		echo "unknown command: $cmd" >&2
+		usage >&2
+		exit 1
+		;;
+esac
