@@ -5,8 +5,10 @@ local sys  = require "luci.sys"
 local util = require "luci.util"
 local disp = require "luci.dispatcher"
 
-local pid = util.trim(sys.exec("pidof tgwol-bot 2>/dev/null") or "")
-local running = (pid ~= "" and pid ~= nil)
+local pid = util.trim(sys.exec(
+	"[ -f /var/run/tgwol.pid ] && p=$(cat /var/run/tgwol.pid 2>/dev/null) " ..
+	"&& kill -0 \"$p\" 2>/dev/null && echo \"$p\"") or "")
+local running = (pid ~= "")
 
 local enabled_in_uci = util.trim(sys.exec("uci -q get tgwol.main.enabled") or "0") == "1"
 local autostart = (sys.call("/etc/init.d/tgwol enabled") == 0)
