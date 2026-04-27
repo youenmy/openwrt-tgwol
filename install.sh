@@ -150,18 +150,18 @@ fi
 
 cat <<EOF
 
-$(say "install complete")
+$(say "установка завершена")
 
-Next steps:
-  • Open LuCI → Services → Telegram WOL Bot
-  • Or use the CLI:
-        tgwol-cli set-token <token>
-        tgwol-cli add-key home_pc        # generates SSH key, prints pubkey
+Дальнейшие шаги:
+  • Откройте LuCI → Сервисы → Telegram WOL Bot
+  • Или используйте CLI:
+        tgwol-cli set-token <токен>
+        tgwol-cli add-key home_pc        # создаёт SSH-ключ и выводит публичную часть
         tgwol-cli list-devices
         tgwol-cli test-token
         /etc/init.d/tgwol restart
-  • In Telegram, send /id to your bot to discover your chat_id, then add it
-    in LuCI → Telegram WOL Bot → Users.
+  • В Telegram отправьте /id своему боту, чтобы узнать chat_id, затем добавьте его
+    в LuCI → Telegram WOL Bot → Пользователи.
 
-Repository: $REPO_RAW
+Репозиторий: $REPO_RAW
 EOF
